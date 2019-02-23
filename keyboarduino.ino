@@ -22,6 +22,8 @@
 const int notes[] = { NOTE_C4, NOTE_D4, NOTE_E4, NOTE_F4 };
 //  note duration in 2millis for replay
 const int noteDuration = 125;
+//  song length
+const int songLength = 256;
 //  button pins, C,D,E,F,Replay,Reset
 const int buttonPins[] = { A0,A1,A2,A3,A4,A5 };
 //const int replayButtonPin = A5;
@@ -41,6 +43,7 @@ bool lastButtonPressedStates[] = { false, false, false, false, false, false };	/
 
 int pressing;	//	actively pressed button, consider changing to enum
 int playing;	//	currently replaying recorded note
+int playingDuration; //Time duration of the current note
 
 volatile int playTime;	//	time playing current replay
 
@@ -51,6 +54,7 @@ LiquidCrystal lcd(rs, en, d4, d5, d6, d7);	//	constructed object
 //  played note array
 
 char* played = NULL;	//	char array of played notes
+int* playedDuration = NULL;
 unsigned int playedSize = 0;	//	number of currently held notes
 unsigned int playedCap = 0;	//	max number of held notes
 
@@ -113,6 +117,8 @@ void play(char note)
 		digitalWrite(noteLedPins[2], LOW);
 		digitalWrite(noteLedPins[3], HIGH);
 		break;
+  case 's':
+  
 	default:
 		noPlay();
 	}
@@ -126,6 +132,15 @@ void record(char n)
 		return;	//	do nothing for now, maybe update to expand array
 	}
 	played[playedSize] = n;	//	append note to array
+
+  if(playedSize != 0){
+        playedDuration[playedSize-1]=playTime;
+        playTime = 0;
+      }else{
+        playTime=0;
+  }
+  //append play time to playTimeArray thing
+  
 	++playedSize;	//	increment size
 	//	lcd writing code, could be generalized based on values sent in lcd.begin(col, row) in setup
 	if (playedSize > 32) { return; }	//	full LCD screen
@@ -146,7 +161,7 @@ void replay()
 	noPlay();
 	pressing = 6;
 	*/
-	if (playTime > noteDuration)	//	note has played for noteDuration Timer1 ticks
+	if (playTime > playedDuration[playing])	//	note has played for playedDuration Timer1 ticks
 	{
 		
 		if (playing < playedSize)	//	if there's another note
@@ -167,9 +182,10 @@ void replay()
 void reset()
 {
 	cli();	//	stop interrupts, maybe not necessary but this is code i don't wan't interrupted
-	for (unsigned int i = 0; i < playedSize; ++i)	//	set array to 0
+	for (unsigned int i = 0; i < playedSize; ++i)	//	set arrays to 0
 	{
 		played[i] = 0;
+    playedDuration[i] = 0;
 	}
 	pressing = numButtons;	//	rest button state
 	playedSize = 0;	//	set number of elements to 0
@@ -193,6 +209,7 @@ void press(int btn, bool state)
 			record('c' + btn);
 			pressing = btn;
 			playing = 0;
+      
 			break;
 		case 4:	//	replay button, change button state, reset replay index, make sure playTime>noteDuration (so start playing first note immediately), call replay
 			pressing = btn;
@@ -213,7 +230,10 @@ void press(int btn, bool state)
 		case 1:
 		case 2:
 		case 3:
-			if (pressing == btn) { noPlay(); pressing = numButtons; }	//	stop playing if active button released
+			if (pressing == btn) { noPlay(); pressing = numButtons; 
+			                      record('s'); 
+			                      playedDuration[playedSize-1]=playTime;//Get the duration that the previous button lasted, and record it
+			                      playTime=0;}	//	stop playing if active button released, this is unpress, where silence can be recorded
 			break;
 		case 4:
 		case 5:
@@ -223,7 +243,7 @@ void press(int btn, bool state)
 }
 
 //	compare held last pressed state to volatile pressedstate, do stuff if there's a change
-void readBtn(int btn)
+void readBtn(int btn) //State change
 {
 	if (btn >= numButtons) { return; }	//	button doesn't exist sanity check
 	bool tempState = buttonPressedStates[btn];	//	save debounced press state (to potentially avoid comparing and assigning two different values, though i dunno if the compiler will optimize it away)
@@ -259,7 +279,10 @@ void setup()
 	playTime = 0;	//	note duration timer
 
 	//  initialize played note array
-	played = (char*)calloc(256, sizeof(char));
+	played = (char*)calloc(songLength, sizeof(char));
+  //  initialize playedDuration array
+  playedDuration = (char*)calloc(songLength, sizeof(int));
+  
 	//	need error handling here
 	playedCap = 255;
 	playedSize = 0;
@@ -278,15 +301,12 @@ void setup()
 	TCCR1B |= (0 << CS12) | (0 << CS11) | (1 << CS10);
 	// enable timer compare interrupt
 	TIMSK1 |= (1 << OCIE1A);
-	sei(); // allow interrupts
-	
+	sei(); // allow interruptsp
 }
 
 // the loop function runs over and over again until power down or reset
 void loop() 
 {
-	
-	
 	for (int i = 0; i < 6; ++i)	//	compare currently held button states to debounced button states, do stuff on change
 	{
 		readBtn(i);
@@ -299,12 +319,9 @@ void loop()
 
 ISR(TIMER1_COMPA_vect)          // interrupt service routine keyed to TIMER1_COMPA
 {
-	
 	++playTime;	//	increment duration timer
 	for (int i = 0; i < numButtons; ++i)	//	debounce button states
 	{
 		debounceBtn(i);
-		
 	}
-	
 }
